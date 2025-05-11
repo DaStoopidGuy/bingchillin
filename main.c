@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -63,6 +64,47 @@ typedef struct {
 } Notification;
 
 typedef struct {
+    Color text;
+    Color ui;
+    Color bg;
+    Color cursor;
+    Color selection;
+} Colors;
+
+typedef struct {
+    bool cursor_up;
+    bool cursor_down;
+    bool cursor_right;
+    bool cursor_left;
+    bool cursor_right_word;
+    bool cursor_left_word;
+    bool cursor_line_start;
+    bool cursor_line_end;
+    bool cursor_file_start;
+    bool cursor_file_end;
+    bool cursor_prev_empty_line;
+    bool cursor_next_empty_line;
+    bool page_up;
+    bool page_down;
+    bool zoom_in;
+    bool zoom_out;
+    bool backspace;
+    bool delete;
+    bool backspace_word;
+    bool delete_word;
+    bool enter;
+    bool tab;
+    bool select; // shift held down
+    bool select_all;
+    bool escape;
+    bool copy;
+    bool cut;
+    bool paste;
+    bool save_file;
+    bool quit;
+} Inputs;
+
+typedef struct {
     Cursor c;
     Buffer buffer;
     Lines  lines;
@@ -73,6 +115,8 @@ typedef struct {
     
     const char * filename;
 
+    Inputs inputs;
+
     Notification notif;
 
     int fontSize;
@@ -80,30 +124,28 @@ typedef struct {
     Font font;
 
     int leftMargin;
+
+    Colors colors;
 } Editor;
 
-void notification_update(Notification *n)
-{
+void notification_update(Notification *n) {
     if (n->timer <= 0) 
         return;
     n->timer -= GetFrameTime();
 }
 
-void notification_issue(Notification *n, const char* message, double timeout)
-{
+void notification_issue(Notification *n, const char* message, double timeout) {
     da_reserve(n, strlen(message)+1);
     strcpy(n->items, message);
 
     n->timer = timeout;
 }
 
-void notification_clear(Notification *n)
-{
+void notification_clear(Notification *n) {
     n->timer = 0.0;
 }
 
-size_t cursor_get_row(Cursor *c, Lines lines)
-{
+size_t cursor_get_row(Cursor *c, Lines lines) {
     assert(lines.count > 0);
     for (size_t i=0; i<lines.count; i++)
     {
@@ -117,14 +159,12 @@ size_t cursor_get_row(Cursor *c, Lines lines)
     return lines.count - 1;
 }
 
-size_t cursor_get_col(Cursor *c, Lines lines)
-{
+size_t cursor_get_col(Cursor *c, Lines lines) {
     Line currentLine = lines.items[c->row];
     return c->pos - currentLine.start;
 }
 
-int editor_measure_text(Editor *e, const char *textStart, int n)
-{
+int editor_measure_text(Editor *e, const char *textStart, int n) {
     int width = 0;
     char *textToMeasure = malloc(sizeof(char) * (n + 1));
     strncpy(textToMeasure, textStart, n);
@@ -136,14 +176,12 @@ int editor_measure_text(Editor *e, const char *textStart, int n)
     return width;
 }
 
-int editor_measure_str(Editor *e, const char *str)
-{
+int editor_measure_str(Editor *e, const char *str) {
     int width = MeasureTextEx(e->font, str, e->fontSize, e->fontSpacing).x;
     return width;
 }
 
-void editor_cursor_update(Editor *e)
-{
+void editor_cursor_update(Editor *e) {
     // find current row
     e->c.row = cursor_get_row(&e->c, e->lines);
     
@@ -162,21 +200,18 @@ void editor_cursor_update(Editor *e)
     e->c.x = editor_measure_text(e, &e->buffer.items[currentLine.start], requiredSize) + e->leftMargin;
 }
 
-void editor_cursor_right(Editor *e)
-{
+void editor_cursor_right(Editor *e) {
     if (e->buffer.count == 0) return;
     if (e->c.pos > e->buffer.count - 1) return;
     e->c.pos++;
 }
 
-void editor_cursor_left(Editor *e)
-{
+void editor_cursor_left(Editor *e) {
     if (e->c.pos == 0) return;
     e->c.pos--;
 }
 
-void editor_cursor_down(Editor *e)
-{
+void editor_cursor_down(Editor *e) {
     if (e->c.row+1 > e->lines.count - 1) return;
 
     Line nextLine = e->lines.items[e->c.row+1];
@@ -188,8 +223,7 @@ void editor_cursor_down(Editor *e)
         e->c.pos = nextLine.end;
 }
 
-void editor_cursor_up(Editor *e)
-{
+void editor_cursor_up(Editor *e) {
     if (e->c.row == 0) return;
 
     Line prevLine = e->lines.items[e->c.row-1];
@@ -201,8 +235,7 @@ void editor_cursor_up(Editor *e)
         e->c.pos = prevLine.end;
 }
 
-void editor_cursor_to_next_word(Editor *e)
-{
+void editor_cursor_to_next_word(Editor *e) {
     bool foundWhitespace = false;
 
     for (size_t i=e->c.pos; i<e->buffer.count; i++)
@@ -225,8 +258,7 @@ void editor_cursor_to_next_word(Editor *e)
     e->c.pos = line.end;
 }
 
-void editor_cursor_to_prev_word(Editor *e)
-{
+void editor_cursor_to_prev_word(Editor *e) {
     bool foundWhitespace = false;
     
     for (size_t i=e->c.pos; i!=0; i--)
@@ -249,33 +281,28 @@ void editor_cursor_to_prev_word(Editor *e)
     e->c.pos = line.start;
 }
 
-void editor_cursor_to_line_start(Editor *e)
-{
+void editor_cursor_to_line_start(Editor *e) {
     Line line = e->lines.items[e->c.row];
     e->c.pos = line.start;
 }
 
-void editor_cursor_to_line_end(Editor *e)
-{
+void editor_cursor_to_line_end(Editor *e) {
     Line line = e->lines.items[e->c.row];
     e->c.pos = line.end;
 }
 
-void editor_cursor_to_first_line(Editor *e)
-{
+void editor_cursor_to_first_line(Editor *e) {
     Line firstLine = e->lines.items[0];
     e->c.pos = firstLine.start;
 }
 
-void editor_cursor_to_last_line(Editor *e)
-{
+void editor_cursor_to_last_line(Editor *e) {
     Line lastLine = e->lines.items[e->lines.count - 1];
     e->c.pos = lastLine.end;
 }
 
 // returns if action was successfull or not
-bool editor_cursor_to_line_number(Editor *e, size_t lineNumber)
-{
+bool editor_cursor_to_line_number(Editor *e, size_t lineNumber) {
     // TODO: for now just move to line start, maybe it is the behaviour i want lol
     if (lineNumber < 1 || lineNumber >= e->lines.count) return false;
 
@@ -285,8 +312,7 @@ bool editor_cursor_to_line_number(Editor *e, size_t lineNumber)
     return true;
 }
 
-void editor_cursor_to_next_empty_line(Editor *e)
-{
+void editor_cursor_to_next_empty_line(Editor *e) {
     for (size_t i=e->c.row+1; i<e->lines.count; i++)
     {
         Line line = e->lines.items[i];
@@ -303,8 +329,7 @@ void editor_cursor_to_next_empty_line(Editor *e)
     return;
 }
 
-void editor_cursor_to_prev_empty_line(Editor *e)
-{
+void editor_cursor_to_prev_empty_line(Editor *e) {
     if (e->c.row == 0 || e->c.row >= e->lines.count) return;
     for (size_t i=e->c.row-1; i!=0; i--)
     {
@@ -322,8 +347,7 @@ void editor_cursor_to_prev_empty_line(Editor *e)
     return;
 }
 
-void editor_calculate_lines(Editor *e)
-{
+void editor_calculate_lines(Editor *e) {
     da_free(&e->lines);
     Line line = {0};
     line.start = 0;
@@ -347,8 +371,7 @@ void editor_calculate_lines(Editor *e)
 }
 
 // Initialize Editor struct
-void editor_init(Editor *e)
-{
+void editor_init(Editor *e) {
     e->c = (Cursor) {0};
     e->buffer = (Buffer) {0};
     da_init(&e->buffer);
@@ -359,6 +382,8 @@ void editor_init(Editor *e)
     e->scrollY = 0;
     
     e->filename = NULL;
+
+    e->inputs = (Inputs) {0};
 
     e->notif = (Notification) {0};
     da_init(&e->notif);
@@ -375,10 +400,20 @@ void editor_init(Editor *e)
     e->leftMargin = 0;
     editor_calculate_lines(e); // NOTE: running this once results in there
                                // being atleast one `Line`
+
+    { // init colors
+        // default colors
+        e->colors = (Colors) {
+            .text = TEXT_COLOR,
+            .ui = UI_COLOR,
+            .bg = BG_COLOR,
+            .cursor = CURSOR_COLOR,
+            .selection = SELECTION_COLOR,
+        };
+    }
 }
 
-void editor_deinit(Editor *e)
-{
+void editor_deinit(Editor *e) {
     da_free(&e->buffer);
     da_free(&e->lines);
     da_free(&e->notif);
@@ -387,8 +422,7 @@ void editor_deinit(Editor *e)
 #endif
 }
 
-void editor_insert_char_at_cursor(Editor *e, char c)
-{
+void editor_insert_char_at_cursor(Editor *e, char c) {
     da_append(&e->buffer, '\0'); // increases count by one
     // move memory from cursor to end right by one
     char *src = e->buffer.items + e->c.pos;
@@ -405,8 +439,7 @@ void editor_insert_char_at_cursor(Editor *e, char c)
     editor_calculate_lines(e);
 }
 
-void editor_remove_char_before_cursor(Editor *e)
-{
+void editor_remove_char_before_cursor(Editor *e) {
     if (e->c.pos == 0) return;
 
     char *src = e->buffer.items + e->c.pos;
@@ -421,8 +454,7 @@ void editor_remove_char_before_cursor(Editor *e)
     editor_calculate_lines(e);
 }
 
-void editor_remove_char_at_cursor(Editor *e)
-{
+void editor_remove_char_at_cursor(Editor *e) {
     if (e->buffer.count == 0) return;
     if (e->c.pos > e->buffer.count - 1) return;
 
@@ -436,8 +468,7 @@ void editor_remove_char_at_cursor(Editor *e)
     editor_calculate_lines(e);
 }
 
-void editor_select(Editor *e, size_t startingPos)
-{
+void editor_select(Editor *e, size_t startingPos) {
     if (e->buffer.count == 0) return;
     Selection *s = &e->selection;
     if (!s->exists)
@@ -454,8 +485,7 @@ void editor_select(Editor *e, size_t startingPos)
     LOG("Selection After %lu - %lu", s->start, s->end);
 }
 
-void editor_selection_clear(Editor *e)
-{
+void editor_selection_clear(Editor *e) {
     e->selection = (Selection) {
         .start = 0,
         .end = 0,
@@ -464,8 +494,7 @@ void editor_selection_clear(Editor *e)
     LOG("Selection cleared");
 }
 
-void editor_selection_delete(Editor *e)
-{
+void editor_selection_delete(Editor *e) {
     Selection *s = &e->selection;
     int start, end;
     if (s->start <= s->end) {
@@ -488,8 +517,7 @@ void editor_selection_delete(Editor *e)
     editor_calculate_lines(e);
 }
 
-void editor_select_all(Editor *e)
-{
+void editor_select_all(Editor *e) {
     const Line firstLine = e->lines.items[0];
     const Line lastLine  = e->lines.items[e->lines.count - 1];
 
@@ -501,24 +529,21 @@ void editor_select_all(Editor *e)
     LOG("Selected all");
 }
 
-void editor_remove_word_before_cursor(Editor *e)
-{
+void editor_remove_word_before_cursor(Editor *e) {
     int startingPos = e->c.pos;
     editor_cursor_to_prev_word(e);
     editor_select(e, startingPos);
     editor_selection_delete(e);
 }
 
-void editor_remove_word_after_cursor(Editor *e)
-{
+void editor_remove_word_after_cursor(Editor *e) {
     int startingPos = e->c.pos;
     editor_cursor_to_next_word(e);
     editor_select(e, startingPos);
     editor_selection_delete(e);
 }
 
-void editor_copy(Editor *e)
-{
+void editor_copy(Editor *e) {
     //get selected text or current line
     char *text = NULL;
     if (e->selection.exists)
@@ -556,8 +581,7 @@ void editor_copy(Editor *e)
     LOG("Copied text");
 }
 
-void editor_cut(Editor *e)
-{
+void editor_cut(Editor *e) {
     editor_copy(e);
     if (e->selection.exists)
         editor_selection_delete(e);
@@ -573,8 +597,7 @@ void editor_cut(Editor *e)
     }
 }
 
-void editor_paste(Editor *e)
-{
+void editor_paste(Editor *e) {
     const char *text = GetClipboardText();
 
     if (e->selection.exists) 
@@ -586,16 +609,14 @@ void editor_paste(Editor *e)
     LOG("Pasted into editor");
 }
 
-void editor_set_font_size(Editor *e, int newFontSize)
-{
+void editor_set_font_size(Editor *e, int newFontSize) {
     if (newFontSize <= 0) return;
     e->fontSize = newFontSize;
     SetTextLineSpacing(e->fontSize);
     LOG("font size changed to %d", e->fontSize);
 }
 
-void editor_load_file(Editor *e, const char *filename)
-{
+void editor_load_file(Editor *e, const char *filename) {
     LOG("Opening file: %s", filename);
     e->filename = filename;
     SetWindowTitle(TextFormat("%s | the bingchillin text editor", e->filename));
@@ -627,8 +648,7 @@ void editor_load_file(Editor *e, const char *filename)
     editor_calculate_lines(e);
 }
 
-void editor_save_file(Editor *e)
-{
+void editor_save_file(Editor *e) {
     if (e->filename == NULL)
     {
         notification_issue(&e->notif, "Can not save: File does not exist", 1);
@@ -649,20 +669,70 @@ void editor_save_file(Editor *e)
     fclose(f);
 }
 
-bool editor_key_pressed(KeyboardKey key)
-{
+bool editor_key_pressed(KeyboardKey key) {
     return IsKeyPressed(key) || IsKeyPressedRepeat(key);
 }
 
-void editor_draw_text(Editor *e, const char* text, Vector2 pos, Color color)
-{
+void editor_draw_text(Editor *e, const char* text, Vector2 pos, Color color) {
     DrawTextEx(e->font, text, pos, e->fontSize, e->fontSpacing, color);
 }
 
-bool editor_update(Editor *e)
-{
-    if (IsKeyDown(KEY_LEFT_CONTROL))
+void inputs_update(Inputs *i) {
+    *i = (Inputs) {0}; // reset
+
+    bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    i->select = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+
+    if (ctrl)
     {
+        i->zoom_in = editor_key_pressed(KEY_EQUAL);
+        i->zoom_out = editor_key_pressed(KEY_MINUS);
+        i->select_all = IsKeyPressed(KEY_A);
+
+        i->save_file = IsKeyPressed(KEY_S);
+        i->quit = IsKeyPressed(KEY_Q);
+
+        i->copy = IsKeyPressed(KEY_C);
+        i->cut = IsKeyPressed(KEY_X);
+        i->paste = editor_key_pressed(KEY_V);
+
+        i->cursor_right_word = editor_key_pressed(KEY_RIGHT);
+        i->cursor_left_word = editor_key_pressed(KEY_LEFT);
+        i->cursor_next_empty_line = editor_key_pressed(KEY_DOWN);
+        i->cursor_prev_empty_line = editor_key_pressed(KEY_UP);
+
+        i->cursor_file_start = IsKeyPressed(KEY_HOME);
+        i->cursor_file_end = IsKeyPressed(KEY_END);
+
+        i->backspace_word = IsKeyPressed(KEY_BACKSPACE);
+        i->delete_word = IsKeyPressed(KEY_DELETE);
+    }
+    else
+    {
+        i->cursor_right = editor_key_pressed(KEY_RIGHT);
+        i->cursor_left = editor_key_pressed(KEY_LEFT);
+        i->cursor_up = editor_key_pressed(KEY_UP);
+        i->cursor_down = editor_key_pressed(KEY_DOWN);
+
+        i->cursor_line_start = IsKeyPressed(KEY_HOME);
+        i->cursor_line_end = IsKeyPressed(KEY_END);
+
+        i->backspace = IsKeyPressed(KEY_BACKSPACE);
+        i->delete = IsKeyPressed(KEY_DELETE);
+    }
+
+    i->page_up = editor_key_pressed(KEY_PAGE_UP);
+    i->page_down = editor_key_pressed(KEY_PAGE_DOWN);
+
+    i->enter = editor_key_pressed(KEY_ENTER);
+    i->tab = IsKeyPressed(KEY_TAB);
+    i->escape = IsKeyPressed(KEY_ESCAPE);
+}
+
+bool editor_update(Editor *e) {
+    inputs_update(&e->inputs);
+
+    if (IsKeyDown(KEY_LEFT_CONTROL)) {
         if (editor_key_pressed(KEY_EQUAL))
             editor_set_font_size(e, e->fontSize + 1);
 
@@ -684,63 +754,86 @@ bool editor_update(Editor *e)
     size_t startingPos = e->c.pos;
     bool cursorMoved = false;
 
-    if (editor_key_pressed(KEY_RIGHT))
-    {
+    if (e->inputs.cursor_right) {
         cursorMoved = true;
         LOG("Cursor right");
-        if (IsKeyDown(KEY_LEFT_CONTROL)) editor_cursor_to_next_word(e);
-        else editor_cursor_right(e);
+        editor_cursor_right(e);
     }
 
-    if (editor_key_pressed(KEY_LEFT))
+    if (e->inputs.cursor_left)
     {
         cursorMoved = true;
         LOG("Cursor left");
-        if (IsKeyDown(KEY_LEFT_CONTROL)) editor_cursor_to_prev_word(e);
-        else editor_cursor_left(e);
+        editor_cursor_left(e);
     }
 
-    if (editor_key_pressed(KEY_DOWN))
-    {
-        cursorMoved = true;
-        LOG("Cursor down");
-        if (IsKeyDown(KEY_LEFT_CONTROL)) editor_cursor_to_next_empty_line(e);
-        else editor_cursor_down(e);
-    }
-
-    if (editor_key_pressed(KEY_UP))
-    {
+    if (e->inputs.cursor_up) {
         cursorMoved = true;
         LOG("Cursor up");
-        if (IsKeyDown(KEY_LEFT_CONTROL)) editor_cursor_to_prev_empty_line(e);
-        else editor_cursor_up(e);
+        editor_cursor_up(e);
     }
 
-    if (IsKeyPressed(KEY_HOME))
-    {
+    if (e->inputs.cursor_down) {
         cursorMoved = true;
-        LOG("Home key pressed");
-        if (IsKeyDown(KEY_LEFT_CONTROL)) editor_cursor_to_first_line(e);
-        else editor_cursor_to_line_start(e);
+        LOG("Cursor down");
+        editor_cursor_down(e);
     }
 
-    if (IsKeyPressed(KEY_END))
-    {
+    if (e->inputs.cursor_right_word) {
         cursorMoved = true;
-        LOG("End key pressed");
-        if (IsKeyDown(KEY_LEFT_CONTROL)) editor_cursor_to_last_line(e);
-        else editor_cursor_to_line_end(e);
+        LOG("Cursor right word");
+        editor_cursor_to_next_word(e);
     }
 
-    if(editor_key_pressed(KEY_PAGE_UP))
-    {
+    if (e->inputs.cursor_left_word) {
+        cursorMoved = true;
+        LOG("Cursor left word");
+        editor_cursor_to_prev_word(e);
+    }
+
+    if (e->inputs.cursor_up) {
+        cursorMoved = true;
+        LOG("Cursor up");
+        editor_cursor_up(e);
+    }
+    if (e->inputs.cursor_down) {
+        cursorMoved = true;
+        LOG("Cursor down");
+        editor_cursor_down(e);
+    }
+
+    if (e->inputs.cursor_line_start) {
+        cursorMoved = true;
+        LOG("Cursor line start");
+        editor_cursor_to_line_start(e);
+    }
+
+    if (e->inputs.cursor_line_end) {
+        cursorMoved = true;
+        LOG("Cursor line end");
+        editor_cursor_to_line_end(e);
+    }
+
+    if (e->inputs.cursor_file_start) {
+        cursorMoved = true;
+        LOG("Cursor first line");
+        editor_cursor_to_first_line(e);
+    }
+
+    if (e->inputs.cursor_file_end) {
+        cursorMoved = true;
+        LOG("Cursor last line");
+        editor_cursor_to_last_line(e);
+    }
+
+    if(e->inputs.page_up) {
         cursorMoved = true;
         LOG("PageUp key pressed");
         if (!editor_cursor_to_line_number(e, e->c.row+1 - 10))
             editor_cursor_to_first_line(e);
     }
 
-    if(editor_key_pressed(KEY_PAGE_DOWN))
+    if(e->inputs.page_down)
     {
         cursorMoved = true;
         LOG("PageDown key pressed");
@@ -748,14 +841,13 @@ bool editor_update(Editor *e)
             editor_cursor_to_last_line(e);
     }
 
-    if (IsKeyDown(KEY_LEFT_SHIFT) && cursorMoved) editor_select(e, startingPos);
+    if (e->inputs.select && cursorMoved) editor_select(e, startingPos);
     else if (cursorMoved) editor_selection_clear(e);
 
     // Movement stuff ends
     // -------------------
 
-    if (editor_key_pressed(KEY_ENTER))
-    {
+    if (e->inputs.enter) {
         LOG("Enter key pressed");
         if (e->selection.exists) editor_selection_delete(e);
         // finds number of spaces on current line
@@ -769,39 +861,42 @@ bool editor_update(Editor *e)
         for (int i = 0; i<spaces; i++) editor_insert_char_at_cursor(e, ' ');
     }
 
-    if (IsKeyPressed(KEY_TAB))
-    {   // TODO: implement proper tab behaviour
+    if (e->inputs.tab) {   // TODO: implement proper tab behaviour
         LOG("Tab key pressed");
         for (int i=0; i<4; i++) editor_insert_char_at_cursor(e, ' ');
     }
 
-    if (IsKeyPressed(KEY_ESCAPE))
-    {
+    if (e->inputs.escape) {
         editor_selection_clear(e);
         notification_clear(&e->notif);
     }
 
-    if (editor_key_pressed(KEY_BACKSPACE))
-    {
+    if (e->inputs.backspace) {
         LOG("Backspace pressed");
         if (e->selection.exists)
             editor_selection_delete(e);
-        else if (IsKeyDown(KEY_LEFT_CONTROL))
-            editor_remove_word_before_cursor(e);
         else
             editor_remove_char_before_cursor(e);
     }
 
-    if (editor_key_pressed(KEY_DELETE))
-    {
+    if (e->inputs.delete) {
         LOG("Delete pressed");
         if (e->selection.exists)
             editor_selection_delete(e);
-        else if (IsKeyDown(KEY_LEFT_CONTROL))
-            editor_remove_word_after_cursor(e);
         else
             editor_remove_char_at_cursor(e);
     }
+
+    if (e->inputs.backspace_word) {
+        LOG("Backspace word");
+        editor_remove_word_before_cursor(e);
+    }
+
+    if (e->inputs.delete_word) {
+        LOG("Delete word");
+        editor_remove_word_after_cursor(e);
+    }
+
 
     char key = GetCharPressed();
     if (key) {
@@ -847,8 +942,7 @@ bool editor_update(Editor *e)
     return 0;
 }
 
-void editor_draw(Editor *e)
-{
+void editor_draw(Editor *e) {
         BeginDrawing();
         ClearBackground(BG_COLOR);
 
@@ -860,7 +954,7 @@ void editor_draw(Editor *e)
                 e->leftMargin+e->scrollX, 
                 0+e->scrollY,
             };
-            editor_draw_text(e, e->buffer.items, pos, TEXT_COLOR);
+            editor_draw_text(e, e->buffer.items, pos, e->colors.text);
             // remove \0
             da_remove(&e->buffer);
         }
@@ -917,7 +1011,7 @@ void editor_draw(Editor *e)
 
                     if (selectionFound)
                     {
-                        DrawRectangleLines(rect.x + e->scrollX + e->leftMargin, rect.y + e->scrollY, rect.width, rect.height, SELECTION_COLOR);
+                        DrawRectangleLines(rect.x + e->scrollX + e->leftMargin, rect.y + e->scrollY, rect.width, rect.height, e->colors.selection);
                     }
                 }
             }
@@ -925,10 +1019,10 @@ void editor_draw(Editor *e)
 
         { // Render line numbers
             // blank box under line numbers
-            DrawRectangle(0, 0, e->leftMargin, GetScreenHeight(), BG_COLOR);
+            DrawRectangle(0, 0, e->leftMargin, GetScreenHeight(), e->colors.bg);
 
             // draw vertical line seperating the line nums
-            DrawLine(e->leftMargin-1, 0, e->leftMargin-1, GetScreenHeight(), UI_COLOR);
+            DrawLine(e->leftMargin-1, 0, e->leftMargin-1, GetScreenHeight(), e->colors.ui);
             
             // the line numbers
             const char *strLineNum;
@@ -941,14 +1035,14 @@ void editor_draw(Editor *e)
                     // NOTE: i being size_t causes HUGE(obviously) underflow on line 0 when scrollY < 0
                     // -  solution cast to (int): may cause issue later (pain) :( 
                 };
-                editor_draw_text(e, strLineNum, pos, UI_COLOR);
+                editor_draw_text(e, strLineNum, pos, e->colors.ui);
             }
             e->leftMargin = strlen(strLineNum) + 2;
             e->leftMargin *= editor_measure_str(e, "a");
         }
 
         { // Render cursor (atleast trying to)
-            DrawLine(e->c.x + e->scrollX + 1, e->c.y + e->scrollY, e->c.x + e->scrollX + 1, e->c.y + e->scrollY + e->fontSize, CURSOR_COLOR);
+            DrawLine(e->c.x + e->scrollX + 1, e->c.y + e->scrollY, e->c.x + e->scrollX + 1, e->c.y + e->scrollY + e->fontSize, e->colors.cursor);
         }
 
         // Render Notification
@@ -962,17 +1056,16 @@ void editor_draw(Editor *e)
             };
             // render blank box
             const int padding = 5;
-            DrawRectangle(textPos.x-padding, textPos.y-padding, textW+(padding*2), textH+(padding*2), BG_COLOR);
-            DrawRectangleLines(textPos.x-padding, textPos.y-padding, textW+(padding*2), textH+(padding*2), CURSOR_COLOR);
+            DrawRectangle(textPos.x-padding, textPos.y-padding, textW+(padding*2), textH+(padding*2), e->colors.bg);
+            DrawRectangleLines(textPos.x-padding, textPos.y-padding, textW+(padding*2), textH+(padding*2), e->colors.cursor);
             // render notification message
-            editor_draw_text(e, e->notif.items, textPos, CURSOR_COLOR);
+            editor_draw_text(e, e->notif.items, textPos, e->colors.cursor);
         }
 
         EndDrawing();
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
 #ifdef BUILD_RELEASE
     SetTraceLogLevel(LOG_ERROR);
 #else
